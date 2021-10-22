@@ -475,6 +475,28 @@ public interface ClientProtocol {
       throws IOException;
 
   /**
+   * Create a part key for a multipart upload key.
+   * @param volumeName
+   * @param bucketName
+   * @param keyName
+   * @param size
+   * @param partNumber
+   * @param uploadID
+   * @param replicationConfig
+   * @return OzoneDataStreamOutput
+   * @throws IOException
+   */
+  OzoneDataStreamOutput createMultipartStreamKey(String volumeName,
+                                                 String bucketName,
+                                                 String keyName,
+                                                 long size,
+                                                 int partNumber,
+                                                 String uploadID,
+                                                 ReplicationConfig replicationConfig)
+          throws IOException;
+
+
+  /**
    * Complete Multipart upload. This will combine all the parts and make the
    * key visible in ozone.
    * @param volumeName
