@@ -210,18 +210,22 @@ public class ObjectEndpoint extends EndpointBase {
 
       // Normal put object
       OzoneBucket bucket = getBucket(bucketName);
-      if ("STREAMING-AWS4-HMAC-SHA256-PAYLOAD"
-          .equals(headers.getHeaderString("x-amz-content-sha256"))) {
-        body = new SignedChunksInputStream(body);
-      }
 
       if (datastreamEnabled) {
+        if ("STREAMING-AWS4-HMAC-SHA256-PAYLOAD"
+            .equals(headers.getHeaderString("x-amz-content-sha256"))) {
+          body = new SignedChunksInputStream(body);
+        }
         return ObjectEndpointStreaming
             .put(bucket, keyPath, length, s3StorageType, chunkSize, body);
       }
 
       output = bucket.createKey(keyPath, length, replicationType,
           replicationFactor, new HashMap<>());
+      if ("STREAMING-AWS4-HMAC-SHA256-PAYLOAD"
+          .equals(headers.getHeaderString("x-amz-content-sha256"))) {
+        body = new SignedChunksInputStream(body);
+      }
       IOUtils.copy(body, output);
 
       return Response.ok().status(HttpStatus.SC_OK)
