@@ -96,6 +96,7 @@ import org.apache.hadoop.ozone.client.io.KeyInputStream;
 import org.apache.hadoop.ozone.client.io.KeyOutputStream;
 import org.apache.hadoop.ozone.client.io.LengthInputStream;
 import org.apache.hadoop.ozone.client.io.MultipartCryptoKeyInputStream;
+import org.apache.hadoop.ozone.client.io.OzoneCryptoDataStreamOutput;
 import org.apache.hadoop.ozone.client.io.OzoneCryptoInputStream;
 import org.apache.hadoop.ozone.client.io.OzoneDataStreamOutput;
 import org.apache.hadoop.ozone.client.io.OzoneInputStream;
@@ -1622,14 +1623,17 @@ public class RpcClient implements ClientProtocol {
 
     FileEncryptionInfo feInfo = openKey.getKeyInfo().getFileEncryptionInfo();
     if (feInfo != null) {
-      // todo: need to support file encrypt,
+      //  support file encrypt,
       //  https://issues.apache.org/jira/browse/HDDS-5892
-      throw new UnsupportedOperationException(
-          "FileEncryptionInfo is not yet supported in " +
-              "createMultipartStreamKey");
-    } else {
-      return new OzoneDataStreamOutput(keyOutputStream);
+      final KeyProvider.KeyVersion decrypted = getDEK(feInfo);
+      final OzoneCryptoDataStreamOutput cryptoOut =
+          new OzoneCryptoDataStreamOutput(keyOutputStream,
+              OzoneKMSUtil.getCryptoCodec(conf, feInfo),
+              decrypted.getMaterial(), feInfo.getIV());
+
+      return new OzoneDataStreamOutput(cryptoOut);
     }
+    return new OzoneDataStreamOutput(keyOutputStream);
   }
 
   @Override
@@ -2006,6 +2010,18 @@ public class RpcClient implements ClientProtocol {
     keyOutputStream
         .addPreallocateBlocks(openKey.getKeyInfo().getLatestVersionLocations(),
             openKey.getOpenVersion());
+
+    FileEncryptionInfo feInfo = openKey.getKeyInfo().getFileEncryptionInfo();
+    if (feInfo != null) {
+      //support file encrypt, https://issues.apache.org/jira/browse/HDDS-5892
+      final KeyProvider.KeyVersion decrypted = getDEK(feInfo);
+      final OzoneCryptoDataStreamOutput cryptoOut =
+          new OzoneCryptoDataStreamOutput(keyOutputStream,
+              OzoneKMSUtil.getCryptoCodec(conf, feInfo),
+              decrypted.getMaterial(), feInfo.getIV());
+
+      return new OzoneDataStreamOutput(cryptoOut);
+    }
     return new OzoneDataStreamOutput(keyOutputStream);
   }
 
