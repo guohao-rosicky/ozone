@@ -57,6 +57,7 @@ import org.apache.hadoop.hdds.client.ECReplicationConfig;
 import org.apache.hadoop.hdds.client.ReplicationConfig;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.hdds.client.ReplicationType;
+import org.apache.hadoop.hdds.conf.ConfigurationSource;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.conf.StorageUnit;
 import org.apache.hadoop.ozone.OzoneConsts;
@@ -199,6 +200,10 @@ public class ObjectEndpoint extends EndpointBase {
       copyHeader = headers.getHeaderString(COPY_SOURCE_HEADER);
       storageType = headers.getHeaderString(STORAGE_CLASS_HEADER);
       boolean storageTypeDefault = StringUtils.isEmpty(storageType);
+
+      if (storageTypeDefault) {
+        storageType = S3StorageType.getDefault(ozoneConfiguration).toString();
+      }
 
       // Normal put object
       OzoneBucket bucket = getBucket(bucketName);

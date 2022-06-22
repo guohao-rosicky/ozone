@@ -323,12 +323,17 @@ public class OzoneBucketStub extends OzoneBucket {
       ByteBufferStreamOutput byteBufferStreamOutput =
           new ByteBufferStreamOutput() {
 
-            private final ByteBuffer buffer = ByteBuffer.allocate((int) size);
+            //private final ByteBuffer buffer = ByteBuffer.allocate((int) size);
+            private final ByteBuffer buffer = ByteBuffer.allocate((int) (1024 * 128));
 
             @Override
             public void close() throws IOException {
+              int position = buffer.position();
               buffer.flip();
-              Part part = new Part(key + size, buffer.array());
+              byte[] bytes = new byte[position];
+              buffer.get(bytes);
+
+              Part part = new Part(key + size, bytes);
               if (partList.get(key) == null) {
                 Map<Integer, Part> parts = new TreeMap<>();
                 parts.put(partNumber, part);

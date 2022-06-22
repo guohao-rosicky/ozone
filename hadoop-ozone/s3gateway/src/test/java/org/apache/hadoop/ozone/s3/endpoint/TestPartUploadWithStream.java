@@ -70,6 +70,7 @@ public class TestPartUploadWithStream {
         true);
     REST.setOzoneConfiguration(conf);
     REST.setDatastreamEnabled(true);
+    REST.init();
   }
 
   @Test
