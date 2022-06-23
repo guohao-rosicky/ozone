@@ -322,9 +322,7 @@ public class OzoneBucketStub extends OzoneBucket {
     } else {
       ByteBufferStreamOutput byteBufferStreamOutput =
           new ByteBufferStreamOutput() {
-
-            //private final ByteBuffer buffer = ByteBuffer.allocate((int) size);
-            private final ByteBuffer buffer = ByteBuffer.allocate((int) (1024 * 128));
+            private final ByteBuffer buffer = ByteBuffer.allocate(1024 * 1024);
 
             @Override
             public void close() throws IOException {
