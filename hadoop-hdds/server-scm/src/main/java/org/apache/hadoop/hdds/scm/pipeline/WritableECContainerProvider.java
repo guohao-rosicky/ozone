@@ -18,6 +18,7 @@
 
 package org.apache.hadoop.hdds.scm.pipeline;
 
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.hadoop.hdds.client.ECReplicationConfig;
 import org.apache.hadoop.hdds.client.ReplicationConfig;
 import org.apache.hadoop.hdds.conf.Config;
@@ -42,6 +43,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.NavigableSet;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentSkipListSet;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeoutException;
 
 import static org.apache.hadoop.hdds.conf.ConfigTag.SCM;
@@ -62,6 +68,10 @@ public class WritableECContainerProvider
   private final long containerSize;
   private final WritableECContainerProviderConfig providerConfig;
 
+  private final ConcurrentSkipListSet<PipelineID> inClosingPipeline =
+      new ConcurrentSkipListSet<>();
+  private final ExecutorService executorService;
+
   public WritableECContainerProvider(WritableECContainerProviderConfig config,
       long containerSize,
       NodeManager nodeManager,
@@ -74,6 +84,11 @@ public class WritableECContainerProvider
     this.containerManager = containerManager;
     this.pipelineChoosePolicy = pipelineChoosePolicy;
     this.containerSize = containerSize;
+
+    ThreadFactory build = new ThreadFactoryBuilder().setDaemon(true)
+        .setNameFormat("EC-Pipeline-Async-Executor - %d").build();
+    this.executorService =
+        Executors.newSingleThreadExecutor(build);
   }
 
   /**
@@ -95,19 +110,25 @@ public class WritableECContainerProvider
       ECReplicationConfig repConfig, String owner, ExcludeList excludeList)
       throws IOException, TimeoutException {
     int maximumPipelines = getMaximumPipelines(repConfig);
-    int openPipelineCount = 0;
-    synchronized (this) {
-      openPipelineCount = pipelineManager.getPipelineCount(repConfig,
+    // getPipelineCount method already has a read lock in it
+    int openPipelineCount = pipelineManager.getPipelineCount(repConfig,
           Pipeline.PipelineState.OPEN);
-      if (openPipelineCount < maximumPipelines) {
-        try {
-          return allocateContainer(repConfig, size, owner, excludeList);
-        } catch (IOException e) {
-          LOG.warn("Unable to allocate a container for {} with {} existing "
-              + "containers", repConfig, openPipelineCount, e);
+    if (openPipelineCount < maximumPipelines) {
+      // Trigger async create container
+      CompletableFuture.runAsync(() -> {
+        final int doubleCheckOpenPipelineCount = pipelineManager
+            .getPipelineCount(repConfig, Pipeline.PipelineState.OPEN);
+        if (doubleCheckOpenPipelineCount < maximumPipelines) {
+          try {
+            allocateContainer(repConfig, size, owner, excludeList);
+          } catch (IOException | TimeoutException e) {
+            LOG.warn("Unable to allocate a container for {} with {} existing "
+                + "containers", repConfig, doubleCheckOpenPipelineCount, e);
+          }
         }
-      }
+      }, executorService);
     }
+
     List<Pipeline> existingPipelines = pipelineManager.getPipelines(
         repConfig, Pipeline.PipelineState.OPEN,
         excludeList.getDatanodes(), excludeList.getPipelineIds());
@@ -125,31 +146,35 @@ public class WritableECContainerProvider
         break;
       }
       Pipeline pipeline = existingPipelines.get(pipelineIndex);
-      synchronized (pipeline.getId()) {
-        try {
-          ContainerInfo containerInfo = getContainerFromPipeline(pipeline);
-          if (containerInfo == null
-              || !containerHasSpace(containerInfo, size)) {
-            existingPipelines.remove(pipelineIndex);
-            pipelineManager.closePipeline(pipeline, true);
-            openPipelineCount--;
-          } else {
-            if (containerIsExcluded(containerInfo, excludeList)) {
-              existingPipelines.remove(pipelineIndex);
-            } else {
-              containerInfo.updateLastUsedTime();
-              return containerInfo;
-            }
-          }
-        } catch (PipelineNotFoundException | ContainerNotFoundException e) {
-          LOG.warn("Pipeline or container not found when selecting a writable "
-              + "container", e);
+      if (pipelineInClosing(pipeline)) {
+        existingPipelines.remove(pipelineIndex);
+        continue;
+      }
+
+      try {
+        ContainerInfo containerInfo = getContainerFromPipeline(pipeline);
+        if (containerInfo == null
+            || !containerHasSpace(containerInfo, size)) {
           existingPipelines.remove(pipelineIndex);
-          pipelineManager.closePipeline(pipeline, true);
+          asyncClosePipeline(pipeline);
           openPipelineCount--;
+        } else {
+          if (containerIsExcluded(containerInfo, excludeList)) {
+            existingPipelines.remove(pipelineIndex);
+          } else {
+            containerInfo.updateLastUsedTime();
+            return containerInfo;
+          }
         }
+      } catch (PipelineNotFoundException | ContainerNotFoundException e) {
+        LOG.warn("Pipeline or container not found when selecting a writable "
+            + "container", e);
+        existingPipelines.remove(pipelineIndex);
+        asyncClosePipeline(pipeline);
+        openPipelineCount--;
       }
     }
+
     // If we get here, all the pipelines we tried were no good. So try to
     // allocate a new one.
     try {
@@ -166,6 +191,26 @@ public class WritableECContainerProvider
           + "existing containers", repConfig, e);
       throw e;
     }
+  }
+
+  private boolean pipelineInClosing(Pipeline pipeline) {
+    return inClosingPipeline.contains(pipeline.getId());
+  }
+
+  private synchronized void asyncClosePipeline(Pipeline pipeline) {
+    final PipelineID id = pipeline.getId();
+    if (pipelineInClosing(pipeline)) {
+      return;
+    }
+    inClosingPipeline.add(id);
+    CompletableFuture.runAsync(() -> {
+      try {
+        pipelineManager.closePipeline(pipeline, true);
+      } catch (IOException | TimeoutException e) {
+        LOG.warn("Unable to close pipeline: {}", pipeline);
+      }
+    }, executorService).whenCompleteAsync(
+        (v, e) -> inClosingPipeline.remove(id), executorService);
   }
 
   private int getMaximumPipelines(ECReplicationConfig repConfig) {
