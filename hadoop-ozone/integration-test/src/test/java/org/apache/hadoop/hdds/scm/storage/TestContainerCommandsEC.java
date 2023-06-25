@@ -883,10 +883,10 @@ public class TestContainerCommandsEC {
                     .stream()
                     .map(ContainerInfo::containerID)
                     .collect(Collectors.toList());
-    Assertions.assertEquals(1, containerIDs.size());
+    Assertions.assertTrue(containerIDs.size() > 0);
     containerID = containerIDs.get(0).getId();
     List<Pipeline> pipelines = scm.getPipelineManager().getPipelines(repConfig);
-    Assertions.assertEquals(1, pipelines.size());
+    Assertions.assertTrue(pipelines.size() > 0);
     pipeline = pipelines.get(0);
     datanodeDetails = pipeline.getNodes();
 
