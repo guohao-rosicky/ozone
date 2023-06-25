@@ -43,8 +43,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.NavigableSet;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentSkipListSet;
+import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -68,8 +69,8 @@ public class WritableECContainerProvider
   private final long containerSize;
   private final WritableECContainerProviderConfig providerConfig;
 
-  private final ConcurrentSkipListSet<PipelineID> inClosingPipeline =
-      new ConcurrentSkipListSet<>();
+  private final Set<PipelineID> inClosingPipeline =
+      new CopyOnWriteArraySet<>();
   private final ExecutorService executorService;
 
   public WritableECContainerProvider(WritableECContainerProviderConfig config,
@@ -113,20 +114,25 @@ public class WritableECContainerProvider
     // getPipelineCount method already has a read lock in it
     int openPipelineCount = pipelineManager.getPipelineCount(repConfig,
           Pipeline.PipelineState.OPEN);
+    CompletableFuture<ContainerInfo> allocateContainerFuture = null;
     if (openPipelineCount < maximumPipelines) {
       // Trigger async create container
-      CompletableFuture.runAsync(() -> {
-        final int doubleCheckOpenPipelineCount = pipelineManager
-            .getPipelineCount(repConfig, Pipeline.PipelineState.OPEN);
-        if (doubleCheckOpenPipelineCount < maximumPipelines) {
-          try {
-            allocateContainer(repConfig, size, owner, excludeList);
-          } catch (IOException | TimeoutException e) {
-            LOG.warn("Unable to allocate a container for {} with {} existing "
-                + "containers", repConfig, doubleCheckOpenPipelineCount, e);
-          }
-        }
-      }, executorService);
+      allocateContainerFuture =
+          CompletableFuture.supplyAsync(() -> {
+            final int doubleCheckOpenPipelineCount = pipelineManager
+                .getPipelineCount(repConfig, Pipeline.PipelineState.OPEN);
+            if (doubleCheckOpenPipelineCount < maximumPipelines) {
+              try {
+                return allocateContainer(repConfig, size, owner, excludeList);
+              } catch (IOException | TimeoutException e) {
+                LOG.warn(
+                    "Unable to allocate a container for {} with {} existing "
+                        + "containers", repConfig, doubleCheckOpenPipelineCount,
+                    e);
+              }
+            }
+            return null;
+          }, executorService);
     }
 
     List<Pipeline> existingPipelines = pipelineManager.getPipelines(
@@ -172,6 +178,14 @@ public class WritableECContainerProvider
         existingPipelines.remove(pipelineIndex);
         asyncClosePipeline(pipeline);
         openPipelineCount--;
+      }
+    }
+
+    // Open pipeline not found, sync wait
+    if (allocateContainerFuture != null) {
+      ContainerInfo containerInfo = allocateContainerFuture.join();
+      if (containerInfo != null) {
+        return containerInfo;
       }
     }
 
