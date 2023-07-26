@@ -42,6 +42,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.NavigableSet;
 
 import static org.apache.hadoop.hdds.conf.ConfigTag.SCM;
@@ -93,7 +94,8 @@ public class WritableECContainerProvider
    */
   @Override
   public ContainerInfo getContainer(final long size,
-      ECReplicationConfig repConfig, String owner, ExcludeList excludeList)
+      ECReplicationConfig repConfig, String owner, ExcludeList excludeList,
+      Map<String, String> metadata)
       throws IOException {
     int maximumPipelines = getMaximumPipelines(repConfig);
     int openPipelineCount;
@@ -102,7 +104,8 @@ public class WritableECContainerProvider
           Pipeline.PipelineState.OPEN);
       if (openPipelineCount < maximumPipelines) {
         try {
-          return allocateContainer(repConfig, size, owner, excludeList);
+          return allocateContainer(repConfig, size, owner, excludeList,
+              metadata);
         } catch (IOException e) {
           LOG.warn("Unable to allocate a container with {} existing ones; "
               + "requested size={}, replication={}, owner={}, {}",
@@ -172,7 +175,8 @@ public class WritableECContainerProvider
       }
       if (openPipelineCount < maximumPipelines) {
         synchronized (this) {
-          return allocateContainer(repConfig, size, owner, excludeList);
+          return allocateContainer(repConfig, size, owner, excludeList,
+              metadata);
         }
       }
       throw new IOException("Pipeline limit (" + maximumPipelines
@@ -196,7 +200,8 @@ public class WritableECContainerProvider
   }
 
   private ContainerInfo allocateContainer(ReplicationConfig repConfig,
-      long size, String owner, ExcludeList excludeList)
+      long size, String owner, ExcludeList excludeList,
+      Map<String, String> metadata)
       throws IOException {
 
     List<DatanodeDetails> excludedNodes = Collections.emptyList();
@@ -207,7 +212,8 @@ public class WritableECContainerProvider
     Pipeline newPipeline = pipelineManager.createPipeline(repConfig,
         excludedNodes, Collections.emptyList());
     ContainerInfo container =
-        containerManager.getMatchingContainer(size, owner, newPipeline);
+        containerManager.getMatchingContainer(size, owner, newPipeline,
+            Collections.emptySet(), metadata);
     pipelineManager.openPipeline(newPipeline.getId());
     LOG.info("Created and opened new pipeline {}", newPipeline);
     return container;

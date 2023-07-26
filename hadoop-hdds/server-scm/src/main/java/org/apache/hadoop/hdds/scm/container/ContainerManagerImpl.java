@@ -170,7 +170,8 @@ public class ContainerManagerImpl implements ContainerManager {
 
   @Override
   public ContainerInfo allocateContainer(
-      final ReplicationConfig replicationConfig, final String owner)
+      final ReplicationConfig replicationConfig, final String owner,
+      Map<String, String> metadata)
       throws IOException {
     // Acquire pipeline manager lock, to avoid any updates to pipeline
     // while allocate container happens. This is to avoid scenario like
@@ -185,7 +186,7 @@ public class ContainerManagerImpl implements ContainerManager {
           .getPipelines(replicationConfig, Pipeline.PipelineState.OPEN);
       if (!pipelines.isEmpty()) {
         pipeline = pipelines.get(random.nextInt(pipelines.size()));
-        containerInfo = createContainer(pipeline, owner);
+        containerInfo = createContainer(pipeline, owner, metadata);
       }
     } finally {
       lock.unlock();
@@ -209,7 +210,7 @@ public class ContainerManagerImpl implements ContainerManager {
             .getPipelines(replicationConfig, Pipeline.PipelineState.OPEN);
         if (!pipelines.isEmpty()) {
           pipeline = pipelines.get(random.nextInt(pipelines.size()));
-          containerInfo = createContainer(pipeline, owner);
+          containerInfo = createContainer(pipeline, owner, metadata);
         } else {
           throw new IOException("Could not allocate container. Cannot get any" +
               " matching pipeline for replicationConfig: " + replicationConfig
@@ -223,9 +224,18 @@ public class ContainerManagerImpl implements ContainerManager {
     return containerInfo;
   }
 
-  private ContainerInfo createContainer(Pipeline pipeline, String owner)
+  @Override
+  public ContainerInfo allocateContainer(ReplicationConfig replicationConfig,
+                                         String owner)
       throws IOException {
-    final ContainerInfo containerInfo = allocateContainer(pipeline, owner);
+    return allocateContainer(replicationConfig, owner, Collections.emptyMap());
+  }
+
+  private ContainerInfo createContainer(Pipeline pipeline, String owner,
+                                        Map<String, String> metadata)
+      throws IOException {
+    final ContainerInfo containerInfo =
+        allocateContainer(pipeline, owner, metadata);
     if (LOG.isTraceEnabled()) {
       LOG.trace("New container allocated: {}", containerInfo);
     }
@@ -233,7 +243,8 @@ public class ContainerManagerImpl implements ContainerManager {
   }
 
   private ContainerInfo allocateContainer(final Pipeline pipeline,
-                                          final String owner)
+                                          final String owner,
+                                          Map<String, String> metadata)
       throws IOException {
     final long uniqueId = sequenceIdGen.getNextId(CONTAINER_ID);
     Preconditions.checkState(uniqueId > 0,
@@ -251,6 +262,16 @@ public class ContainerManagerImpl implements ContainerManager {
         .setContainerID(containerID.getId())
         .setDeleteTransactionId(0)
         .setReplicationType(pipeline.getType());
+
+    List<HddsProtos.KeyValue> metadataList = new ArrayList<>();
+    if (!metadata.isEmpty()) {
+      for (Map.Entry<String, String> entry : metadata.entrySet()) {
+        metadataList.add(
+            HddsProtos.KeyValue.newBuilder().setKey(entry.getValue())
+                .setValue(entry.getValue()).build());
+      }
+    }
+    containerInfoBuilder.addAllMetadata(metadataList);
 
     if (pipeline.getReplicationConfig() instanceof ECReplicationConfig) {
       containerInfoBuilder.setEcReplicationConfig(
@@ -320,21 +341,22 @@ public class ContainerManagerImpl implements ContainerManager {
 
   @Override
   public ContainerInfo getMatchingContainer(final long size, final String owner,
-      final Pipeline pipeline, final Set<ContainerID> excludedContainerIDs) {
+      final Pipeline pipeline, final Set<ContainerID> excludedContainerIDs,
+      Map<String, String> metadata) {
     NavigableSet<ContainerID> containerIDs;
     ContainerInfo containerInfo;
     try {
       synchronized (pipeline.getId()) {
         containerIDs = getContainersForOwner(pipeline, owner);
         if (containerIDs.size() < getOpenContainerCountPerPipeline(pipeline)) {
-          allocateContainer(pipeline, owner);
+          allocateContainer(pipeline, owner, metadata);
           containerIDs = getContainersForOwner(pipeline, owner);
         }
         containerIDs.removeAll(excludedContainerIDs);
         containerInfo = containerStateManager.getMatchingContainer(
             size, owner, pipeline.getId(), containerIDs);
         if (containerInfo == null) {
-          containerInfo = allocateContainer(pipeline, owner);
+          containerInfo = allocateContainer(pipeline, owner, metadata);
         }
         return containerInfo;
       }

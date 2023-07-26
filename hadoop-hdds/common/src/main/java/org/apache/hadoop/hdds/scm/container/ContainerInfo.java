@@ -20,6 +20,8 @@ package org.apache.hadoop.hdds.scm.container;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Map;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import org.apache.hadoop.hdds.client.ECReplicationConfig;
@@ -90,6 +92,8 @@ public final class ContainerInfo implements Comparable<ContainerInfo> {
   // container replica should have the same sequenceId.
   private long sequenceId;
 
+  private Map<String, String> metadata;
+
   @SuppressWarnings("parameternumber")
   private ContainerInfo(
       long containerID,
@@ -102,7 +106,8 @@ public final class ContainerInfo implements Comparable<ContainerInfo> {
       long deleteTransactionId,
       long sequenceId,
       ReplicationConfig repConfig,
-      Clock clock) {
+      Clock clock,
+      Map<String, String> metadata) {
     this.containerID = ContainerID.valueOf(containerID);
     this.pipelineID = pipelineID;
     this.usedBytes = usedBytes;
@@ -115,6 +120,11 @@ public final class ContainerInfo implements Comparable<ContainerInfo> {
     this.sequenceId = sequenceId;
     this.replicationConfig = repConfig;
     this.clock = clock;
+    if (metadata == null) {
+      this.metadata = new HashMap<>();
+    } else {
+      this.metadata = metadata;
+    }
   }
 
   public static ContainerInfo fromProtobuf(HddsProtos.ContainerInfoProto info) {
@@ -130,14 +140,21 @@ public final class ContainerInfo implements Comparable<ContainerInfo> {
         .setContainerID(info.getContainerID())
         .setDeleteTransactionId(info.getDeleteTransactionId())
         .setReplicationConfig(config)
-        .setSequenceId(info.getSequenceId())
-        .build();
+        .setSequenceId(info.getSequenceId());
+
+    Map<String, String> metadata =
+        new HashMap<>();
+    if (!info.getMetadataList().isEmpty()) {
+      for (HddsProtos.KeyValue keyValue : info.getMetadataList()) {
+        metadata.put(keyValue.getKey(), keyValue.getValue());
+      }
+    }
+    builder.setMetadata(metadata);
 
     if (info.hasPipelineID()) {
       builder.setPipelineID(PipelineID.getFromProtobuf(info.getPipelineID()));
     }
     return builder.build();
-
   }
 
   /**
@@ -293,6 +310,14 @@ public final class ContainerInfo implements Comparable<ContainerInfo> {
     this.owner = owner;
   }
 
+  public Map<String, String> getMetadata() {
+    return metadata;
+  }
+
+  public void setMetadata(Map<String, String> metadata) {
+    this.metadata = metadata;
+  }
+
   @Override
   public String toString() {
     return "ContainerInfo{"
@@ -301,6 +326,7 @@ public final class ContainerInfo implements Comparable<ContainerInfo> {
         + ", stateEnterTime=" + stateEnterTime
         + ", pipelineID=" + pipelineID
         + ", owner=" + owner
+        + ", metadata=" + metadata
         + '}';
   }
 
@@ -383,6 +409,13 @@ public final class ContainerInfo implements Comparable<ContainerInfo> {
     private long sequenceId;
     private PipelineID pipelineID;
     private ReplicationConfig replicationConfig;
+    private Map<String, String> metadata;
+
+    public Builder setMetadata(
+        Map<String, String> metadata) {
+      this.metadata = metadata;
+      return this;
+    }
 
     public Builder setPipelineID(PipelineID pipelineId) {
       this.pipelineID = pipelineId;
@@ -447,7 +480,7 @@ public final class ContainerInfo implements Comparable<ContainerInfo> {
     public ContainerInfo build() {
       return new ContainerInfo(containerID, state, pipelineID,
           used, keys, stateEnterTime, owner, deleteTransactionId,
-          sequenceId, replicationConfig, clock);
+          sequenceId, replicationConfig, clock, metadata);
     }
   }
 

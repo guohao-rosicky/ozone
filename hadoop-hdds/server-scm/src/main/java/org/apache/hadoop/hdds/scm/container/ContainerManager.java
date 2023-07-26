@@ -120,6 +120,10 @@ public interface ContainerManager extends Closeable {
                                   String owner)
       throws IOException;
 
+  ContainerInfo allocateContainer(ReplicationConfig replicationConfig,
+                                  String owner, Map<String, String> metadata)
+      throws IOException;
+
   /**
    * Update container state.
    * @param containerID - Container ID
@@ -174,17 +178,26 @@ public interface ContainerManager extends Closeable {
     return getMatchingContainer(size, owner, pipeline, Collections.emptySet());
   }
 
+  default ContainerInfo getMatchingContainer(long size, String owner,
+                                     Pipeline pipeline,
+                                     Set<ContainerID> excludedContainerIDS) {
+    return getMatchingContainer(size, owner, pipeline, Collections.emptySet(),
+        Collections.emptyMap());
+  }
+
   /**
    * Returns ContainerInfo which matches the requirements.
    * @param size - the amount of space required in the container
    * @param owner - the user which requires space in its owned container
    * @param pipeline - pipeline to which the container should belong.
    * @param excludedContainerIDS - containerIds to be excluded.
+   * @param metadata - container metadata.
    * @return ContainerInfo for the matching container.
    */
   ContainerInfo getMatchingContainer(long size, String owner,
                                      Pipeline pipeline,
-                                     Set<ContainerID> excludedContainerIDS);
+                                     Set<ContainerID> excludedContainerIDS,
+                                     Map<String, String> metadata);
 
   /**
    * Once after report processor handler completes, call this to notify

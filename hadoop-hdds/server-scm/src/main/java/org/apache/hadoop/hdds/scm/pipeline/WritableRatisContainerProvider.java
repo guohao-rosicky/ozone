@@ -34,6 +34,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -63,7 +64,8 @@ public class WritableRatisContainerProvider
 
   @Override
   public ContainerInfo getContainer(final long size,
-      ReplicationConfig repConfig, String owner, ExcludeList excludeList)
+      ReplicationConfig repConfig, String owner, ExcludeList excludeList,
+      Map<String, String> metadata)
       throws IOException {
     /*
       Here is the high level logic.
@@ -99,7 +101,7 @@ public class WritableRatisContainerProvider
                         Pipeline.PipelineState.OPEN);
         if (availablePipelines.size() != 0) {
           containerInfo = selectContainer(availablePipelines, size, owner,
-              excludeList);
+              excludeList, metadata);
         }
         if (containerInfo != null) {
           return containerInfo;
@@ -156,7 +158,7 @@ public class WritableRatisContainerProvider
             break;
           }
           containerInfo = selectContainer(availablePipelines, size, owner,
-              excludeList);
+              excludeList, metadata);
           if (containerInfo != null) {
             return containerInfo;
           }
@@ -190,7 +192,8 @@ public class WritableRatisContainerProvider
   }
 
   private ContainerInfo selectContainer(List<Pipeline> availablePipelines,
-      long size, String owner, ExcludeList excludeList) {
+      long size, String owner, ExcludeList excludeList,
+      Map<String, String> metadata) {
     Pipeline pipeline;
     ContainerInfo containerInfo;
 
@@ -202,7 +205,7 @@ public class WritableRatisContainerProvider
 
     // look for OPEN containers that match the criteria.
     containerInfo = containerManager.getMatchingContainer(size, owner,
-        pipeline, excludeList.getContainerIds());
+        pipeline, excludeList.getContainerIds(), metadata);
 
     return containerInfo;
 
