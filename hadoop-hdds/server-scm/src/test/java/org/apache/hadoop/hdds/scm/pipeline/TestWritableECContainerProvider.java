@@ -127,7 +127,8 @@ public class TestWritableECContainerProvider {
       containers.put(container.containerID(), container);
       return container;
     }).when(containerManager).getMatchingContainer(Mockito.anyLong(),
-        Mockito.anyString(), Mockito.any(Pipeline.class));
+        Mockito.anyString(), Mockito.any(Pipeline.class),
+        Mockito.anySet(), Mockito.anyMap());
 
     Mockito.doAnswer(call ->
         containers.get((ContainerID)call.getArguments()[0]))

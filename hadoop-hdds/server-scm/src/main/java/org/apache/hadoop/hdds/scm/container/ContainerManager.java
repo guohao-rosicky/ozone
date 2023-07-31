@@ -181,7 +181,7 @@ public interface ContainerManager extends Closeable {
   default ContainerInfo getMatchingContainer(long size, String owner,
                                      Pipeline pipeline,
                                      Set<ContainerID> excludedContainerIDS) {
-    return getMatchingContainer(size, owner, pipeline, Collections.emptySet(),
+    return getMatchingContainer(size, owner, pipeline, excludedContainerIDS,
         Collections.emptyMap());
   }
 
