@@ -229,6 +229,20 @@ public final class OmKeyInfo extends WithParentObjectId
     return updateLocationInfoList(locationInfoList, isMpu, false);
   }
 
+  public boolean checkKeyLengthAndBlockTotalLength() {
+    final OmKeyLocationInfoGroup latestVersionLocations =
+        getLatestVersionLocations();
+    if (latestVersionLocations == null) {
+      return true;
+    }
+    long i = 0;
+    for (OmKeyLocationInfo omKeyLocationInfo : latestVersionLocations
+        .getLocationList()) {
+      i += omKeyLocationInfo.getLength();
+    }
+    return i == getDataSize();
+  }
+
   /**
    * updates the length of the each block in the list given.
    * This will be called when the key is being committed to OzoneManager.

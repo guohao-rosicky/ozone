@@ -242,6 +242,10 @@ public class OMKeyCommitRequest extends OMKeyRequest {
       List<OmKeyLocationInfo> uncommitted =
           omKeyInfo.updateLocationInfoList(locationInfoList, false);
 
+      Preconditions.checkState(omKeyInfo.checkKeyLengthAndBlockTotalLength(),
+          "Key data size and block total length not match for commit, args: " +
+              commitKeyArgs);
+
       // Set the UpdateID to current transactionLogIndex
       omKeyInfo.setUpdateID(trxnLogIndex, ozoneManager.isRatisEnabled());
 
