@@ -717,7 +717,7 @@ public class TestOMKeyCommitRequest extends TestOMKeyRequest {
               .setBlockID(HddsProtos.BlockID.newBuilder()
                   .setContainerBlockID(HddsProtos.ContainerBlockID.newBuilder()
                       .setContainerID(i + 1000).setLocalID(i + 100).build()))
-              .setOffset(0).setLength(200).setCreateVersion(version).build();
+              .setOffset(0).setLength(100).setCreateVersion(version).build();
       keyLocations.add(keyLocation);
     }
     return keyLocations;
