@@ -254,6 +254,15 @@ public final class OMRequestTestUtils {
         false);
     omKeyInfo.appendNewBlocks(locationList, false);
 
+    final Long newDataSize =
+        omKeyInfo.getLatestVersionLocations().getLocationList().stream()
+            .map(OmKeyLocationInfo::getLength).reduce(0L, Long::sum);
+    omKeyInfo.setDataSize(newDataSize);
+
+    System.out.println("--------");
+    System.out.println(newDataSize);
+    System.out.println("--------");
+
     addKeyToTable(openKeyTable, addToCache, omKeyInfo, clientID, trxnLogIndex,
             omMetadataManager);
   }

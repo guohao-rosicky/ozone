@@ -64,6 +64,8 @@ public class TestOMKeyCommitRequest extends TestOMKeyRequest {
 
   private String parentDir;
 
+  private BucketLayout bucketLayout = BucketLayout.DEFAULT;
+
   @Test
   public void testPreExecute() throws Exception {
     doPreExecute(createCommitKeyRequest());
@@ -74,30 +76,31 @@ public class TestOMKeyCommitRequest extends TestOMKeyRequest {
 
     OMRequest modifiedOmRequest =
         doPreExecute(createCommitKeyRequest());
-
-    OMKeyCommitRequest omKeyCommitRequest =
-        getOmKeyCommitRequest(modifiedOmRequest);
-
     // Append 3 blocks locations.
     List<OmKeyLocationInfo> allocatedLocationList = getKeyLocation(3)
         .stream().map(OmKeyLocationInfo::getFromProtobuf)
         .collect(Collectors.toList());
 
     OMRequestTestUtils.addVolumeAndBucketToDB(volumeName, bucketName,
-        omMetadataManager, omKeyCommitRequest.getBucketLayout());
+        omMetadataManager, bucketLayout);
 
     String openKey = addKeyToOpenKeyTable(allocatedLocationList);
+    modifiedOmRequest =
+        changeNewDataSizeToRequest(allocatedLocationList, modifiedOmRequest);
+    OMKeyCommitRequest omKeyCommitRequest =
+        getOmKeyCommitRequest(modifiedOmRequest);
+
     String ozoneKey = getOzonePathKey();
 
     OmKeyInfo omKeyInfo =
             omMetadataManager.getOpenKeyTable(
-                    omKeyCommitRequest.getBucketLayout()).get(openKey);
+                bucketLayout).get(openKey);
     Assert.assertNotNull(omKeyInfo);
 
     // Key should not be there in key table, as validateAndUpdateCache is
     // still not called.
     omKeyInfo =
-        omMetadataManager.getKeyTable(omKeyCommitRequest.getBucketLayout())
+        omMetadataManager.getKeyTable(bucketLayout)
             .get(ozoneKey);
 
     Assert.assertNull(omKeyInfo);
@@ -567,16 +570,12 @@ public class TestOMKeyCommitRequest extends TestOMKeyRequest {
     version += 1;
 
     OMRequest modifiedOmRequest = doPreExecute(createCommitKeyRequest());
-
-    OMKeyCommitRequest omKeyCommitRequest =
-            getOmKeyCommitRequest(modifiedOmRequest);
-
     KeyArgs keyArgs = modifiedOmRequest.getCommitKeyRequest().getKeyArgs();
 
     String ozoneKey = getOzonePathKey();
     // Key should be there in key table, as validateAndUpdateCache is called.
     OmKeyInfo omKeyInfo =
-        omMetadataManager.getKeyTable(omKeyCommitRequest.getBucketLayout())
+        omMetadataManager.getKeyTable(bucketLayout)
             .get(ozoneKey);
 
     Assert.assertNotNull(omKeyInfo);
@@ -590,6 +589,10 @@ public class TestOMKeyCommitRequest extends TestOMKeyRequest {
                     .map(OmKeyLocationInfo::getFromProtobuf)
                     .collect(Collectors.toList());
     addKeyToOpenKeyTable(allocatedLocationList);
+    modifiedOmRequest =
+        changeNewDataSizeToRequest(allocatedLocationList, modifiedOmRequest);
+    OMKeyCommitRequest omKeyCommitRequest =
+        getOmKeyCommitRequest(modifiedOmRequest);
 
     OMClientResponse omClientResponse =
             omKeyCommitRequest.validateAndUpdateCache(ozoneManager,
@@ -744,9 +747,22 @@ public class TestOMKeyCommitRequest extends TestOMKeyRequest {
               keyName, clientID);
   }
 
+  protected OMRequest changeNewDataSizeToRequest(
+      List<OmKeyLocationInfo> allocatedLocationList,
+      OMRequest modifiedOmRequest) {
+    final Long newDataSize =
+        allocatedLocationList.stream().map(OmKeyLocationInfo::getLength)
+            .reduce(0L, Long::sum);
+    return OMRequest.newBuilder(modifiedOmRequest).setCommitKeyRequest(
+        CommitKeyRequest.newBuilder(modifiedOmRequest.getCommitKeyRequest())
+            .setKeyArgs(KeyArgs.newBuilder(
+                modifiedOmRequest.getCommitKeyRequest().getKeyArgs())
+                .setDataSize(newDataSize).build())).build();
+  }
+
   @NotNull
   protected OMKeyCommitRequest getOmKeyCommitRequest(OMRequest omRequest) {
-    return new OMKeyCommitRequest(omRequest, BucketLayout.DEFAULT);
+    return new OMKeyCommitRequest(omRequest, bucketLayout);
   }
 
   protected void verifyKeyName(OmKeyInfo omKeyInfo) {

@@ -238,6 +238,10 @@ public final class OmKeyInfo extends WithParentObjectId
     final Long i = latestVersionLocations
         .getLocationList().stream().map(OmKeyLocationInfo::getLength)
         .reduce(0L, Long::sum);
+
+    System.out.println("=====" + i + " ====" + getDataSize());
+
+
     return i == getDataSize();
   }
 
