@@ -18,6 +18,7 @@ package org.apache.hadoop.ozone.container.common.statemachine.commandhandler;
 
 
 import com.google.common.base.Preconditions;
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.hadoop.hdds.conf.ConfigurationSource;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
@@ -38,6 +39,9 @@ import org.apache.hadoop.hdds.protocol.proto.
 
 import java.io.File;
 import java.io.IOException;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
@@ -54,7 +58,9 @@ public class SetNodeOperationalStateCommandHandler implements CommandHandler {
   private final ConfigurationSource conf;
   private final Consumer<HddsProtos.NodeOperationalState> replicationSupervisor;
   private final AtomicInteger invocationCount = new AtomicInteger(0);
+  private final AtomicInteger queuedCount = new AtomicInteger(0);
   private final AtomicLong totalTime = new AtomicLong(0);
+  private final ExecutorService executor;
 
   /**
    * Set Node State command handler.
@@ -65,6 +71,9 @@ public class SetNodeOperationalStateCommandHandler implements CommandHandler {
       Consumer<HddsProtos.NodeOperationalState> replicationSupervisor) {
     this.conf = conf;
     this.replicationSupervisor = replicationSupervisor;
+    this.executor =
+        Executors.newSingleThreadExecutor(new ThreadFactoryBuilder()
+            .setNameFormat("SetNodeOperationalStateThread-%d").build());
   }
 
   /**
@@ -78,35 +87,37 @@ public class SetNodeOperationalStateCommandHandler implements CommandHandler {
   @Override
   public void handle(SCMCommand command, OzoneContainer container,
       StateContext context, SCMConnectionManager connectionManager) {
-    long startTime = Time.monotonicNow();
-    invocationCount.incrementAndGet();
-    StorageContainerDatanodeProtocolProtos.SetNodeOperationalStateCommandProto
-        setNodeCmdProto = null;
+    queuedCount.incrementAndGet();
+    CompletableFuture.runAsync(() -> {
+      long startTime = Time.monotonicNow();
+      invocationCount.incrementAndGet();
 
-    if (command.getType() != Type.setNodeOperationalStateCommand) {
-      LOG.warn("Skipping handling command, expected command "
-              + "type {} but found {}",
-          Type.setNodeOperationalStateCommand, command.getType());
-      return;
-    }
-    SetNodeOperationalStateCommand setNodeCmd =
-        (SetNodeOperationalStateCommand) command;
-    setNodeCmdProto = setNodeCmd.getProto();
-    DatanodeDetails dni = context.getParent().getDatanodeDetails();
-    HddsProtos.NodeOperationalState state =
-        setNodeCmdProto.getNodeOperationalState();
-    dni.setPersistedOpState(state);
-    dni.setPersistedOpStateExpiryEpochSec(
-        setNodeCmd.getStateExpiryEpochSeconds());
-    try {
-      persistDatanodeDetails(dni);
-    } catch (IOException ioe) {
-      LOG.error("Failed to persist the datanode state", ioe);
-      // TODO - this should probably be raised, but it will break the command
-      //      handler interface.
-    }
-    replicationSupervisor.accept(state);
-    totalTime.addAndGet(Time.monotonicNow() - startTime);
+      if (command.getType() != Type.setNodeOperationalStateCommand) {
+        LOG.warn("Skipping handling command, expected command "
+                + "type {} but found {}",
+            Type.setNodeOperationalStateCommand, command.getType());
+        return;
+      }
+      SetNodeOperationalStateCommand setNodeCmd =
+          (SetNodeOperationalStateCommand) command;
+      StorageContainerDatanodeProtocolProtos.SetNodeOperationalStateCommandProto
+          setNodeCmdProto = setNodeCmd.getProto();
+      DatanodeDetails dni = context.getParent().getDatanodeDetails();
+      HddsProtos.NodeOperationalState state =
+          setNodeCmdProto.getNodeOperationalState();
+      dni.setPersistedOpState(state);
+      dni.setPersistedOpStateExpiryEpochSec(
+          setNodeCmd.getStateExpiryEpochSeconds());
+      try {
+        persistDatanodeDetails(dni);
+      } catch (IOException ioe) {
+        LOG.error("Failed to persist the datanode state", ioe);
+        // TODO - this should probably be raised, but it will break the command
+        //      handler interface.
+      }
+      replicationSupervisor.accept(state);
+      totalTime.addAndGet(Time.monotonicNow() - startTime);
+    }, executor).whenComplete((v, e) -> queuedCount.decrementAndGet());
   }
 
   // TODO - this duplicates code in HddsDatanodeService and InitDatanodeState
@@ -159,6 +170,6 @@ public class SetNodeOperationalStateCommandHandler implements CommandHandler {
 
   @Override
   public int getQueuedCount() {
-    return 0;
+    return queuedCount.get();
   }
 }
