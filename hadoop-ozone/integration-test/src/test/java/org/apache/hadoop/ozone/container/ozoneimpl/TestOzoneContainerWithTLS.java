@@ -24,6 +24,7 @@ import org.apache.hadoop.hdds.protocol.MockDatanodeDetails;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandRequestProto;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandResponseProto;
+import org.apache.hadoop.hdds.scm.XceiverClientGrpcConnectionPool;
 import org.apache.hadoop.hdds.scm.XceiverClientManager;
 import org.apache.hadoop.hdds.scm.XceiverClientManager.ScmClientConfig;
 import org.apache.hadoop.hdds.scm.client.ClientTrustManager;
@@ -160,7 +161,9 @@ public class TestOzoneContainerWithTLS {
     OzoneContainer container = createAndStartOzoneContainerInstance();
 
     try (XceiverClientGrpc client =
-             new XceiverClientGrpc(pipeline, conf, aClientTrustManager())) {
+             new XceiverClientGrpc(pipeline, conf,
+                 new XceiverClientGrpcConnectionPool(conf,
+                     aClientTrustManager()))) {
       client.connect();
 
       createContainer(client, containerTokenEnabled, getTestContainerID());

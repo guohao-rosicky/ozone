@@ -19,24 +19,10 @@
 package org.apache.hadoop.hdds.scm;
 
 import org.apache.hadoop.hdds.conf.ConfigurationSource;
-import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
-import org.apache.hadoop.hdds.scm.client.ClientTrustManager;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.ozone.OzoneConfigKeys;
-import org.apache.ratis.thirdparty.io.grpc.Status;
-import org.apache.ratis.thirdparty.io.grpc.netty.NettyChannelBuilder;
-
-import java.io.IOException;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
-
-import static org.apache.hadoop.ozone.OzoneConfigKeys.OZONE_CLIENT_EC_GRPC_RETRIES_ENABLED;
-import static org.apache.hadoop.ozone.OzoneConfigKeys.OZONE_CLIENT_EC_GRPC_RETRIES_ENABLED_DEFAULT;
-import static org.apache.hadoop.ozone.OzoneConfigKeys.OZONE_CLIENT_EC_GRPC_RETRIES_MAX;
-import static org.apache.hadoop.ozone.OzoneConfigKeys.OZONE_CLIENT_EC_GRPC_RETRIES_MAX_DEFAULT;
 
 /**
  * {@link XceiverClientSpi} implementation to work specifically with EC
@@ -48,15 +34,10 @@ import static org.apache.hadoop.ozone.OzoneConfigKeys.OZONE_CLIENT_EC_GRPC_RETRI
  */
 public class ECXceiverClientGrpc extends XceiverClientGrpc {
 
-  private final boolean enableRetries;
-
   public ECXceiverClientGrpc(
       Pipeline pipeline,
-      ConfigurationSource config,
-      ClientTrustManager trustManager) {
-    super(pipeline, config, trustManager);
-    this.enableRetries = config.getBoolean(OZONE_CLIENT_EC_GRPC_RETRIES_ENABLED,
-        OZONE_CLIENT_EC_GRPC_RETRIES_ENABLED_DEFAULT);
+      ConfigurationSource config, XceiverClientGrpcConnectionPool pool) {
+    super(pipeline, config, pool);
     setTimeout(config.getTimeDuration(OzoneConfigKeys.
         OZONE_CLIENT_EC_GRPC_WRITE_TIMEOUT, OzoneConfigKeys
         .OZONE_CLIENT_EC_GRPC_WRITE_TIMEOUT_DEFAULT, TimeUnit.SECONDS));
@@ -76,43 +57,5 @@ public class ECXceiverClientGrpc extends XceiverClientGrpc {
   protected boolean shouldBlockAndWaitAsyncReply(
       ContainerProtos.ContainerCommandRequestProto request) {
     return false;
-  }
-
-  @Override
-  protected NettyChannelBuilder createChannel(DatanodeDetails dn, int port)
-      throws IOException {
-    NettyChannelBuilder channelBuilder = super.createChannel(dn, port);
-    if (enableRetries) {
-      double maxAttempts = getConfig().getInt(OZONE_CLIENT_EC_GRPC_RETRIES_MAX,
-          OZONE_CLIENT_EC_GRPC_RETRIES_MAX_DEFAULT);
-
-      channelBuilder.defaultServiceConfig(createRetryServiceConfig(maxAttempts))
-          .maxRetryAttempts((int) maxAttempts).enableRetry();
-    }
-    return channelBuilder;
-  }
-
-  private Map<String, Object> createRetryServiceConfig(double maxAttempts) {
-    Map<String, Object> retryPolicy = new HashMap<>();
-    // Maximum number of RPC attempts which includes the original RPC.
-    retryPolicy.put("maxAttempts", maxAttempts);
-    // The initial retry attempt will occur at random(0, initialBackoff)
-    retryPolicy.put("initialBackoff", "0.5s");
-    retryPolicy.put("maxBackoff", "3s");
-    retryPolicy.put("backoffMultiplier", 1.5D);
-    //Status codes for with RPC retry are attempted.
-    retryPolicy.put("retryableStatusCodes", Collections.singletonList(
-        Status.Code.DEADLINE_EXCEEDED.name()));
-    Map<String, Object> methodConfig = new HashMap<>();
-    methodConfig.put("retryPolicy", retryPolicy);
-
-    Map<String, Object> name = new HashMap<>();
-    name.put("service", "hadoop.hdds.datanode.XceiverClientProtocolService");
-    methodConfig.put("name", Collections.singletonList(name));
-
-    Map<String, Object> serviceConfig = new HashMap<>();
-    serviceConfig.put("methodConfig",
-        Collections.singletonList(methodConfig));
-    return serviceConfig;
   }
 }

@@ -18,9 +18,12 @@
 package org.apache.hadoop.hdds.scm;
 
 import com.google.common.cache.Cache;
+import org.apache.hadoop.hdds.protocol.DatanodeDetails;
+import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdds.scm.XceiverClientManager.ScmClientConfig;
 import org.apache.hadoop.hdds.scm.client.ClientTrustManager;
 import org.apache.hadoop.hdds.scm.container.common.helpers.ContainerWithPipeline;
+import org.apache.hadoop.hdds.scm.node.NodeManager;
 import org.apache.hadoop.io.IOUtils;
 import org.apache.hadoop.ozone.MiniOzoneCluster;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
@@ -38,6 +41,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.UUID;
 
 import static org.apache.hadoop.hdds.HddsConfigKeys.HDDS_METADATA_DIR_NAME;
@@ -278,4 +282,55 @@ public class TestXceiverClientManager {
       clientManager.releaseClient(client2, false);
     }
   }
+
+  @Test
+  public void testConnectionPool() throws IOException, InterruptedException {
+    OzoneConfiguration conf = new OzoneConfiguration();
+    ScmClientConfig clientConfig = conf.getObject(ScmClientConfig.class);
+    clientConfig.setMaxSize(1);
+    try (XceiverClientManager clientManager =
+             new XceiverClientManager(conf, clientConfig, null)) {
+
+      NodeManager scmNodeManager =
+          cluster.getStorageContainerManager().getScmNodeManager();
+
+      List<DatanodeDetails> allNodes = scmNodeManager.getAllNodes();
+      for (DatanodeDetails node : allNodes) {
+        clientManager.getGrpcConnectPool().connect(node);
+        assertEquals(clientManager.getGrpcConnectPool().getRefcount(node), 1);
+
+        clientManager.getGrpcConnectPool().connect(node);
+        assertEquals(clientManager.getGrpcConnectPool().getRefcount(node), 2);
+
+        clientManager.getGrpcConnectPool().close(node.getUuid());
+        assertEquals(clientManager.getGrpcConnectPool().getRefcount(node), 1);
+      }
+      ContainerWithPipeline container1 =
+          storageContainerLocationClient.allocateContainer(
+              SCMTestUtils.getReplicationType(conf),
+              SCMTestUtils.getReplicationFactor(conf),
+              OzoneConsts.OZONE);
+      XceiverClientSpi client1 =
+          clientManager.acquireClient(container1.getPipeline());
+
+      ContainerProtos.ContainerCommandRequestProto.Builder request =
+          ContainerProtos.ContainerCommandRequestProto.newBuilder();
+      request.setCmdType(ContainerProtos.Type.CreateContainer);
+      request.setContainerID(container1.getContainerInfo().getContainerID());
+      request.setCreateContainer(
+          ContainerProtos.CreateContainerRequestProto.getDefaultInstance());
+      request.setDatanodeUuid(container1.getPipeline().getFirstNode().getUuidString());
+
+      client1.sendCommandOnAllNodes(request.build());
+      clientManager.releaseClient(client1, true);
+      for (DatanodeDetails node : allNodes) {
+        assertEquals(clientManager.getGrpcConnectPool().getRefcount(node), 1);
+      }
+    }
+  }
+
+
+
+
+
 }

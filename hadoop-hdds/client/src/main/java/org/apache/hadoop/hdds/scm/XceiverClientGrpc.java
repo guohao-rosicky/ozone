@@ -39,18 +39,14 @@ import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandRequestProto;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.ContainerCommandResponseProto;
 import org.apache.hadoop.hdds.protocol.datanode.proto.ContainerProtos.DatanodeBlockID;
-import org.apache.hadoop.hdds.protocol.datanode.proto.XceiverClientProtocolServiceGrpc;
 import org.apache.hadoop.hdds.protocol.datanode.proto.XceiverClientProtocolServiceGrpc.XceiverClientProtocolServiceStub;
 import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
-import org.apache.hadoop.hdds.scm.client.ClientTrustManager;
 import org.apache.hadoop.hdds.scm.client.HddsClientUtils;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
-import org.apache.hadoop.hdds.security.SecurityConfig;
 import org.apache.hadoop.hdds.security.exception.SCMSecurityException;
-import org.apache.hadoop.hdds.tracing.GrpcClientInterceptor;
 import org.apache.hadoop.hdds.tracing.TracingUtil;
 import org.apache.hadoop.ozone.OzoneConfigKeys;
-import org.apache.hadoop.ozone.OzoneConsts;
+
 import java.util.concurrent.TimeoutException;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -58,12 +54,8 @@ import com.google.common.base.Preconditions;
 import io.opentracing.Scope;
 import io.opentracing.Span;
 import io.opentracing.util.GlobalTracer;
-import org.apache.ratis.thirdparty.io.grpc.ManagedChannel;
 import org.apache.ratis.thirdparty.io.grpc.Status;
-import org.apache.ratis.thirdparty.io.grpc.netty.GrpcSslContexts;
-import org.apache.ratis.thirdparty.io.grpc.netty.NettyChannelBuilder;
 import org.apache.ratis.thirdparty.io.grpc.stub.StreamObserver;
-import org.apache.ratis.thirdparty.io.netty.handler.ssl.SslContextBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -87,19 +79,20 @@ public class XceiverClientGrpc extends XceiverClientSpi {
       LoggerFactory.getLogger(XceiverClientGrpc.class);
   private final Pipeline pipeline;
   private final ConfigurationSource config;
-  private final Map<UUID, XceiverClientProtocolServiceStub> asyncStubs;
+
   private final XceiverClientMetrics metrics;
-  private final Map<UUID, ManagedChannel> channels;
+  private final Map<UUID, XceiverClientGrpcConnectionPool.Connection> connects;
+
   private final Semaphore semaphore;
   private long timeout;
-  private final SecurityConfig secConfig;
   private final boolean topologyAwareRead;
-  private final ClientTrustManager trustManager;
   // Cache the DN which returned the GetBlock command so that the ReadChunk
   // command can be sent to the same DN.
   private final Map<DatanodeBlockID, DatanodeDetails> getBlockDNcache;
 
   private boolean closed = false;
+
+  private final XceiverClientGrpcConnectionPool connectPool;
 
   /**
    * Constructs a client that can communicate with the Container framework on
@@ -107,10 +100,9 @@ public class XceiverClientGrpc extends XceiverClientSpi {
    *
    * @param pipeline - Pipeline that defines the machines.
    * @param config   -- Ozone Config
-   * @param trustManager - a {@link ClientTrustManager} with proper CA handling.
    */
   public XceiverClientGrpc(Pipeline pipeline, ConfigurationSource config,
-      ClientTrustManager trustManager) {
+       XceiverClientGrpcConnectionPool pool) {
     super();
     Preconditions.checkNotNull(pipeline);
     Preconditions.checkNotNull(config);
@@ -119,17 +111,15 @@ public class XceiverClientGrpc extends XceiverClientSpi {
         .OZONE_CLIENT_READ_TIMEOUT_DEFAULT, TimeUnit.SECONDS));
     this.pipeline = pipeline;
     this.config = config;
-    this.secConfig = new SecurityConfig(config);
     this.semaphore =
         new Semaphore(HddsClientUtils.getMaxOutstandingRequests(config));
     this.metrics = XceiverClientManager.getXceiverClientMetrics();
-    this.channels = new HashMap<>();
-    this.asyncStubs = new HashMap<>();
+    this.connects = new HashMap<>();
     this.topologyAwareRead = config.getBoolean(
         OzoneConfigKeys.OZONE_NETWORK_TOPOLOGY_AWARE_READ_KEY,
         OzoneConfigKeys.OZONE_NETWORK_TOPOLOGY_AWARE_READ_DEFAULT);
-    this.trustManager = trustManager;
     this.getBlockDNcache = new ConcurrentHashMap<>();
+    this.connectPool = pool;
   }
 
   /**
@@ -159,49 +149,12 @@ public class XceiverClientGrpc extends XceiverClientSpi {
 
   private synchronized void connectToDatanode(DatanodeDetails dn)
       throws IOException {
-    if (isConnected(dn)) {
-      return;
-    }
-    // read port from the data node, on failure use default configured
-    // port.
-    int port = dn.getPort(DatanodeDetails.Port.Name.STANDALONE).getValue();
-    if (port == 0) {
-      port = config.getInt(OzoneConfigKeys.DFS_CONTAINER_IPC_PORT,
-          OzoneConfigKeys.DFS_CONTAINER_IPC_PORT_DEFAULT);
-    }
-
     // Add credential context to the client call
     if (LOG.isDebugEnabled()) {
       LOG.debug("Nodes in pipeline : {}", pipeline.getNodes());
       LOG.debug("Connecting to server : {}", dn.getIpAddress());
     }
-    ManagedChannel channel = createChannel(dn, port).build();
-    XceiverClientProtocolServiceStub asyncStub =
-        XceiverClientProtocolServiceGrpc.newStub(channel);
-    asyncStubs.put(dn.getUuid(), asyncStub);
-    channels.put(dn.getUuid(), channel);
-  }
-
-  protected NettyChannelBuilder createChannel(DatanodeDetails dn, int port)
-      throws IOException {
-    NettyChannelBuilder channelBuilder =
-        NettyChannelBuilder.forAddress(dn.getIpAddress(), port).usePlaintext()
-            .maxInboundMessageSize(OzoneConsts.OZONE_SCM_CHUNK_MAX_SIZE)
-            .intercept(new GrpcClientInterceptor());
-    if (secConfig.isSecurityEnabled() && secConfig.isGrpcTlsEnabled()) {
-      SslContextBuilder sslContextBuilder = GrpcSslContexts.forClient();
-      if (trustManager != null) {
-        sslContextBuilder.trustManager(trustManager);
-      }
-      if (secConfig.useTestCert()) {
-        channelBuilder.overrideAuthority("localhost");
-      }
-      channelBuilder.useTransportSecurity().
-          sslContext(sslContextBuilder.build());
-    } else {
-      channelBuilder.usePlaintext();
-    }
-    return channelBuilder;
+    connects.put(dn.getUuid(), connectPool.connect(dn));
   }
 
   /**
@@ -212,11 +165,12 @@ public class XceiverClientGrpc extends XceiverClientSpi {
    */
   @VisibleForTesting
   public boolean isConnected(DatanodeDetails details) {
-    return isConnected(channels.get(details.getUuid()));
-  }
-
-  private boolean isConnected(ManagedChannel channel) {
-    return channel != null && !channel.isTerminated() && !channel.isShutdown();
+    XceiverClientGrpcConnectionPool.Connection
+        connect = connects.get(details.getUuid());
+    if (connect != null) {
+      return connect.isConnected();
+    }
+    return false;
   }
 
   /**
@@ -230,16 +184,8 @@ public class XceiverClientGrpc extends XceiverClientSpi {
   @Override
   public synchronized void close() {
     closed = true;
-    for (ManagedChannel channel : channels.values()) {
-      channel.shutdownNow();
-      try {
-        channel.awaitTermination(60, TimeUnit.MINUTES);
-      } catch (InterruptedException e) {
-        LOG.error("InterruptedException while waiting for channel termination",
-            e);
-        // Re-interrupt the thread while catching InterruptedException
-        Thread.currentThread().interrupt();
-      }
+    for (UUID dnId : connects.keySet()) {
+      connectPool.close(dnId);
     }
   }
 
@@ -504,9 +450,16 @@ public class XceiverClientGrpc extends XceiverClientSpi {
     long requestTime = System.currentTimeMillis();
     metrics.incrPendingContainerOpsMetrics(request.getCmdType());
 
+    XceiverClientProtocolServiceStub asyncStub;
+    if (pipeline.getReplicationConfig().getReplicationType()
+        .equals(HddsProtos.ReplicationType.EC)) {
+      asyncStub = connects.get(dnId).getEcAsyncStub();
+    } else {
+      asyncStub = connects.get(dnId).getAsyncStub();
+    }
     // create a new grpc message stream pair for each call.
     final StreamObserver<ContainerCommandRequestProto> requestObserver =
-        asyncStubs.get(dnId).withDeadlineAfter(timeout, TimeUnit.SECONDS)
+        asyncStub.withDeadlineAfter(timeout, TimeUnit.SECONDS)
             .send(new StreamObserver<ContainerCommandResponseProto>() {
               @Override
               public void onNext(ContainerCommandResponseProto value) {
@@ -558,27 +511,10 @@ public class XceiverClientGrpc extends XceiverClientSpi {
       throw new IOException("This channel is not connected.");
     }
 
-    ManagedChannel channel = channels.get(dn.getUuid());
-    // If the channel doesn't exist for this specific datanode or the channel
-    // is closed, just reconnect
-    if (!isConnected(channel)) {
-      reconnect(dn);
-    }
-
-  }
-
-  private void reconnect(DatanodeDetails dn)
-      throws IOException {
-    ManagedChannel channel;
-    try {
-      connectToDatanode(dn);
-      channel = channels.get(dn.getUuid());
-    } catch (Exception e) {
-      throw new IOException("Error while connecting", e);
-    }
-
-    if (!isConnected(channel)) {
-      throw new IOException("This channel is not connected.");
+    XceiverClientGrpcConnectionPool.Connection
+        connect = connects.get(dn.getUuid());
+    if (connect != null) {
+      connect.checkOpen();
     }
   }
 

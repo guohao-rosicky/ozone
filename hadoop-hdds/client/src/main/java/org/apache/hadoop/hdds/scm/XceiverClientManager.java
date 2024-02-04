@@ -73,6 +73,9 @@ public class XceiverClientManager implements XceiverClientFactory {
   private static XceiverClientMetrics metrics;
   private boolean isSecurityEnabled;
   private final boolean topologyAwareRead;
+
+  private final XceiverClientGrpcConnectionPool grpcConnectPool;
+
   /**
    * Creates a new XceiverClientManager for non secured ozone cluster.
    * For security enabled ozone cluster, client should use the other constructor
@@ -96,6 +99,9 @@ public class XceiverClientManager implements XceiverClientFactory {
       Preconditions.checkNotNull(trustManager);
       this.trustManager = trustManager;
     }
+
+    this.grpcConnectPool =
+        new XceiverClientGrpcConnectionPool(conf, trustManager);
 
     this.clientCache = CacheBuilder.newBuilder()
         .recordStats()
@@ -244,10 +250,10 @@ public class XceiverClientManager implements XceiverClientFactory {
                   trustManager);
               break;
             case STAND_ALONE:
-              client = new XceiverClientGrpc(pipeline, conf, trustManager);
+              client = new XceiverClientGrpc(pipeline, conf, grpcConnectPool);
               break;
             case EC:
-              client = new ECXceiverClientGrpc(pipeline, conf, trustManager);
+              client = new ECXceiverClientGrpc(pipeline, conf, grpcConnectPool);
               break;
             case CHAINED:
             default:
@@ -322,6 +328,10 @@ public class XceiverClientManager implements XceiverClientFactory {
     if (metrics != null) {
       metrics.unRegister();
     }
+  }
+
+  public XceiverClientGrpcConnectionPool getGrpcConnectPool() {
+    return grpcConnectPool;
   }
 
   /**
