@@ -88,14 +88,14 @@ public class XceiverClientGrpcConnectionPool {
     return 0;
   }
 
-  public synchronized Connection connect(DatanodeDetails dn)
+  public Connection connect(DatanodeDetails dn)
       throws IOException {
     UUID dnUuid = dn.getUuid();
     Connection connection = connections.get(dnUuid);
     if (connections.get(dnUuid) == null) {
       connection = new Connection(dn);
       connections.put(dn.getUuid(), connection);
-      connection.connect();
+      connection.connectIfNeed();
     }
     connection.retain();
     return connection;
@@ -113,6 +113,7 @@ public class XceiverClientGrpcConnectionPool {
    */
   public class Connection {
     private final DatanodeDetails dn;
+    private int port;
 
     private XceiverClientProtocolServiceStub asyncStub;
     private ManagedChannel channel;
@@ -124,6 +125,13 @@ public class XceiverClientGrpcConnectionPool {
 
     public Connection(DatanodeDetails dn) {
       this.dn = dn;
+      // read port from the data node, on failure use default configured
+      // port.
+      port = dn.getPort(DatanodeDetails.Port.Name.STANDALONE).getValue();
+      if (port == 0) {
+        port = config.getInt(OzoneConfigKeys.DFS_CONTAINER_IPC_PORT,
+            OzoneConfigKeys.DFS_CONTAINER_IPC_PORT_DEFAULT);
+      }
     }
 
     public XceiverClientProtocolServiceStub getAsyncStub() {
@@ -134,27 +142,19 @@ public class XceiverClientGrpcConnectionPool {
       return ecAsyncStub;
     }
 
-    public synchronized void connect() throws IOException {
-      if (isConnected()) {
-        return;
+    public synchronized void connectIfNeed() throws IOException {
+      if (!isChannelConnected(channel)) {
+        // Add credential context to the client call
+        if (LOG.isDebugEnabled()) {
+          LOG.debug("Connecting to server : {} ref: {}", dn.getIpAddress(), ref.get());
+        }
+        channel = createChannel(dn, port).build();
+        asyncStub = XceiverClientProtocolServiceGrpc.newStub(channel);
       }
-      // read port from the data node, on failure use default configured
-      // port.
-      int port = dn.getPort(DatanodeDetails.Port.Name.STANDALONE).getValue();
-      if (port == 0) {
-        port = config.getInt(OzoneConfigKeys.DFS_CONTAINER_IPC_PORT,
-            OzoneConfigKeys.DFS_CONTAINER_IPC_PORT_DEFAULT);
+      if (!isChannelConnected(ecChannel)) {
+        ecChannel = createEcChannel(dn, port).build();
+        ecAsyncStub = XceiverClientProtocolServiceGrpc.newStub(ecChannel);
       }
-
-      // Add credential context to the client call
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("Connecting to server : {} ref: {}", dn.getIpAddress(), ref.get());
-      }
-      channel = createChannel(dn, port).build();
-      asyncStub = XceiverClientProtocolServiceGrpc.newStub(channel);
-
-      ecChannel = createEcChannel(dn, port).build();
-      ecAsyncStub = XceiverClientProtocolServiceGrpc.newStub(ecChannel);
     }
 
     public int getRefcount() {
@@ -175,17 +175,13 @@ public class XceiverClientGrpcConnectionPool {
           LOG.debug("Release : {} ref: {}", dn.getIpAddress(), r);
         }
         if (r <= 0) {
-          if (isConnected()) {
-            close();
-          }
+          close();
         }
       }
     }
 
     public synchronized void checkOpen() throws IOException {
-      if (!isConnected()) {
-        connect();
-      }
+      connectIfNeed();
       if (!isConnected()) {
         throw new IOException("This channel is not connected.");
       }
@@ -259,23 +255,21 @@ public class XceiverClientGrpcConnectionPool {
     }
 
     private void close() {
-      if (channel != null) {
-        closeChannel(channel);
-      }
-      if (ecChannel != null) {
-        closeChannel(ecChannel);
-      }
+      closeChannel(channel);
+      closeChannel(ecChannel);
     }
 
     private void closeChannel(ManagedChannel managedChannel) {
-      managedChannel.shutdownNow();
-      try {
-        managedChannel.awaitTermination(60, TimeUnit.MINUTES);
-      } catch (InterruptedException e) {
-        LOG.error("InterruptedException while waiting for channel termination",
-            e);
-        // Re-interrupt the thread while catching InterruptedException
-        Thread.currentThread().interrupt();
+      if (isChannelConnected(managedChannel)) {
+        managedChannel.shutdownNow();
+        try {
+          managedChannel.awaitTermination(60, TimeUnit.MINUTES);
+        } catch (InterruptedException e) {
+          LOG.error("InterruptedException while waiting for channel termination",
+              e);
+          // Re-interrupt the thread while catching InterruptedException
+          Thread.currentThread().interrupt();
+        }
       }
     }
   }
