@@ -15,28 +15,29 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package org.apache.hadoop.ozone.recon.api.types;
 
-package org.apache.hadoop.hdds.scm.ha.io;
+import com.fasterxml.jackson.annotation.JsonInclude;
 
-import com.google.common.primitives.Ints;
-import com.google.protobuf.ByteString;
-import com.google.protobuf.InvalidProtocolBufferException;
-import com.google.protobuf.Proto2Utils;
+import javax.xml.bind.annotation.XmlElement;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
- * Encodes/decodes an integer to a byte string.
+ * Class that represents the API Response structure of Datanodes.
  */
-public class IntegerCodec implements Codec {
-  @Override
-  public ByteString serialize(Object object)
-      throws InvalidProtocolBufferException {
-    // toByteArray returns a new array
-    return Proto2Utils.unsafeByteString(Ints.toByteArray((Integer) object));
+public class RemoveDataNodesResponseWrapper {
+
+  @XmlElement(name = "datanodesResponseMap")
+  @JsonInclude(JsonInclude.Include.NON_NULL)
+  private Map<String, DatanodesResponse> datanodesResponseMap = new HashMap<>();
+
+  public Map<String, DatanodesResponse> getDatanodesResponseMap() {
+    return datanodesResponseMap;
   }
 
-  @Override
-  public Object deserialize(Class<?> type, ByteString value)
-      throws InvalidProtocolBufferException {
-    return Ints.fromByteArray(value.toByteArray());
+  public void setDatanodesResponseMap(
+      Map<String, DatanodesResponse> datanodesResponseMap) {
+    this.datanodesResponseMap = datanodesResponseMap;
   }
 }
