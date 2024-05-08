@@ -17,10 +17,12 @@
 
 package org.apache.hadoop.ozone.om;
 
+import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.CacheLoader.InvalidCacheLoadException;
 import com.google.common.cache.LoadingCache;
+import com.google.common.cache.RemovalListener;
 import org.apache.hadoop.hdds.conf.OzoneConfiguration;
 import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
@@ -76,8 +78,9 @@ public class ScmClient {
         OZONE_OM_CONTAINER_LOCATION_CACHE_TTL,
         OZONE_OM_CONTAINER_LOCATION_CACHE_TTL_DEFAULT.getDuration(), unit);
 
-    final Map<UUID, DatanodeDetails>
-        datanodeDetailsCache = new ConcurrentHashMap<>();
+    final Cache<UUID, DatanodeDetails> datanodeDetailsCache =
+        CacheBuilder.newBuilder().maximumSize(10000).build();
+
     return CacheBuilder.newBuilder()
         .maximumSize(maxSize)
         .expireAfterWrite(ttl, unit)
@@ -107,15 +110,26 @@ public class ScmClient {
   }
 
   static Pipeline newPipelineWithDNCache(Pipeline pipeline,
-      Map<UUID, DatanodeDetails> datanodeDetailsCache) {
+      Cache<UUID, DatanodeDetails> datanodeDetailsCache) {
     Pipeline.Builder builder = Pipeline.newBuilder(pipeline);
     List<DatanodeDetails> nodes = new ArrayList<>();
     for (DatanodeDetails node : pipeline.getNodes()) {
       DatanodeDetails datanodeDetails =
-          datanodeDetailsCache.get(node.getUuid());
+          datanodeDetailsCache.getIfPresent(node.getUuid());
       if (node.equals(datanodeDetails)) {
         nodes.add(datanodeDetails);
       } else {
+        List<DatanodeDetails.Port> ports = node.getPorts();
+        List<DatanodeDetails.Port> newPorts = new ArrayList<>();
+        for (DatanodeDetails.Port port : ports) {
+          if (port.getName().equals(DatanodeDetails.Port.Name.STANDALONE) ||
+              port.getName().equals(DatanodeDetails.Port.Name.RATIS) ||
+              port.getName()
+                  .equals(DatanodeDetails.Port.Name.RATIS_DATASTREAM)) {
+            newPorts.add(port);
+          }
+        }
+        node.setPorts(newPorts);
         datanodeDetailsCache.put(node.getUuid(), node);
         nodes.add(node);
       }
