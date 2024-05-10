@@ -355,11 +355,16 @@ public final class Pipeline {
       throws UnknownPipelineStateException {
 
     List<HddsProtos.DatanodeDetailsProto> members = new ArrayList<>();
+    List<HddsProtos.UUID> membersUuid = new ArrayList<>();
     List<Integer> memberReplicaIndexes = new ArrayList<>();
 
     for (DatanodeDetails dn : nodeStatus.keySet()) {
-      members.add(dn.toProto(clientVersion));
+//      members.add(dn.toProto(clientVersion));
       memberReplicaIndexes.add(replicaIndexes.getOrDefault(dn, 0));
+
+      membersUuid.add(HddsProtos.UUID.newBuilder()
+          .setMostSigBits(dn.getUuid().getMostSignificantBits())
+          .setLeastSigBits(dn.getUuid().getLeastSignificantBits()).build());
     }
 
     HddsProtos.Pipeline.Builder builder = HddsProtos.Pipeline.newBuilder()
@@ -369,7 +374,8 @@ public final class Pipeline {
         .setLeaderID(leaderId != null ? leaderId.toString() : "")
         .setCreationTimeStamp(creationTimestamp.toEpochMilli())
         .addAllMembers(members)
-        .addAllMemberReplicaIndexes(memberReplicaIndexes);
+        .addAllMemberReplicaIndexes(memberReplicaIndexes)
+        .addAllMembersUuid128(membersUuid);
 
     if (replicationConfig instanceof ECReplicationConfig) {
       builder.setEcReplicationConfig(((ECReplicationConfig) replicationConfig)
@@ -414,7 +420,7 @@ public final class Pipeline {
 
   private static Pipeline getFromProtobufSetCreationTimestamp(
       HddsProtos.Pipeline proto) throws UnknownPipelineStateException {
-    return toBuilder(proto)
+    return toBuilder(proto, null)
         .setCreateTimestamp(Instant.now())
         .build();
   }
@@ -427,20 +433,37 @@ public final class Pipeline {
     return newBuilder(this);
   }
 
-  public static Builder toBuilder(HddsProtos.Pipeline pipeline)
+  public static Builder toBuilder(HddsProtos.Pipeline pipeline,
+      Map<UUID, DatanodeDetails> datanodeDetailsMap)
       throws UnknownPipelineStateException {
     Preconditions.checkNotNull(pipeline, "Pipeline is null");
 
     Map<DatanodeDetails, Integer> nodes = new LinkedHashMap<>();
     int index = 0;
     int repIndexListLength = pipeline.getMemberReplicaIndexesCount();
-    for (DatanodeDetailsProto member : pipeline.getMembersList()) {
-      int repIndex = 0;
-      if (index < repIndexListLength) {
-        repIndex = pipeline.getMemberReplicaIndexes(index);
+
+    if (!pipeline.getMembersUuid128List().isEmpty() &&
+        datanodeDetailsMap != null && !datanodeDetailsMap.isEmpty()) {
+
+      for (HddsProtos.UUID uuid : pipeline.getMembersUuid128List()) {
+        int repIndex = 0;
+        DatanodeDetails datanodeDetails = datanodeDetailsMap.get(
+            new UUID(uuid.getMostSigBits(), uuid.getLeastSigBits()));
+        if (index < repIndexListLength) {
+          repIndex = pipeline.getMemberReplicaIndexes(index);
+        }
+        nodes.put(datanodeDetails, repIndex);
+        index++;
       }
-      nodes.put(DatanodeDetails.getFromProtoBuf(member), repIndex);
-      index++;
+    } else {
+      for (DatanodeDetailsProto member : pipeline.getMembersList()) {
+        int repIndex = 0;
+        if (index < repIndexListLength) {
+          repIndex = pipeline.getMemberReplicaIndexes(index);
+        }
+        nodes.put(DatanodeDetails.getFromProtoBuf(member), repIndex);
+        index++;
+      }
     }
     UUID leaderId = null;
     if (pipeline.hasLeaderID128()) {
@@ -474,7 +497,13 @@ public final class Pipeline {
 
   public static Pipeline getFromProtobuf(HddsProtos.Pipeline pipeline)
       throws UnknownPipelineStateException {
-    return toBuilder(pipeline).build();
+    return toBuilder(pipeline, null).build();
+  }
+
+  public static Pipeline getFromProtobuf(HddsProtos.Pipeline pipeline,
+      Map<UUID, DatanodeDetails> datanodeDetailsMap)
+      throws UnknownPipelineStateException {
+    return toBuilder(pipeline, datanodeDetailsMap).build();
   }
 
   @Override

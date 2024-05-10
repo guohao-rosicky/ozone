@@ -1051,6 +1051,7 @@ message KeyLocationList {
     repeated KeyLocation keyLocations = 2;
     optional FileEncryptionInfoProto fileEncryptionInfo = 3;
     optional bool isMultipartKey = 4 [default = false];
+    repeated hadoop.hdds.DatanodeDetailsProto members = 5;
 }
 
 /**

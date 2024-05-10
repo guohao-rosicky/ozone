@@ -17,6 +17,7 @@
 package org.apache.hadoop.ozone.om.helpers;
 
 import org.apache.hadoop.hdds.client.BlockID;
+import org.apache.hadoop.hdds.protocol.DatanodeDetails;
 import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.hdds.scm.pipeline.UnknownPipelineStateException;
 import org.apache.hadoop.hdds.scm.storage.BlockLocationInfo;
@@ -24,6 +25,9 @@ import org.apache.hadoop.hdds.security.token.OzoneBlockTokenIdentifier;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.KeyLocation;
 import org.apache.hadoop.ozone.protocolPB.OMPBHelper;
 import org.apache.hadoop.security.token.Token;
+
+import java.util.Map;
+import java.util.UUID;
 
 /**
  * One key can be too huge to fit in one container. In which case it gets split
@@ -138,12 +142,40 @@ public final class OmKeyLocationInfo extends BlockLocationInfo {
     }
   }
 
+  private static Pipeline getPipeline(KeyLocation keyLocation,
+      Map<UUID, DatanodeDetails> datanodeDetailsMap) {
+    try {
+      return keyLocation.hasPipeline() ?
+          Pipeline.getFromProtobuf(keyLocation.getPipeline(),
+              datanodeDetailsMap) : null;
+    } catch (UnknownPipelineStateException e) {
+      return null;
+    }
+  }
+
   public static OmKeyLocationInfo getFromProtobuf(KeyLocation keyLocation) {
     Builder builder = new Builder()
         .setBlockID(BlockID.getFromProtobuf(keyLocation.getBlockID()))
         .setLength(keyLocation.getLength())
         .setOffset(keyLocation.getOffset())
         .setPipeline(getPipeline(keyLocation))
+        .setCreateVersion(keyLocation.getCreateVersion())
+        .setPartNumber(keyLocation.getPartNumber());
+    if (keyLocation.hasToken()) {
+      Token<OzoneBlockTokenIdentifier> token =
+          OMPBHelper.tokenFromProto(keyLocation.getToken());
+      builder.setToken(token);
+    }
+    return builder.build();
+  }
+
+  public static OmKeyLocationInfo getFromProtobuf(KeyLocation keyLocation,
+      Map<UUID, DatanodeDetails> datanodeDetailsMap) {
+    Builder builder = new Builder()
+        .setBlockID(BlockID.getFromProtobuf(keyLocation.getBlockID()))
+        .setLength(keyLocation.getLength())
+        .setOffset(keyLocation.getOffset())
+        .setPipeline(getPipeline(keyLocation, datanodeDetailsMap))
         .setCreateVersion(keyLocation.getCreateVersion())
         .setPartNumber(keyLocation.getPartNumber());
     if (keyLocation.hasToken()) {

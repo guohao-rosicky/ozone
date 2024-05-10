@@ -17,14 +17,21 @@
 package org.apache.hadoop.ozone.om.helpers;
 
 import com.google.common.base.Objects;
+import org.apache.hadoop.hdds.protocol.DatanodeDetails;
+import org.apache.hadoop.hdds.protocol.proto.HddsProtos;
+import org.apache.hadoop.hdds.scm.pipeline.Pipeline;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos;
 import org.apache.hadoop.ozone.protocol.proto.OzoneManagerProtocolProtos.KeyLocationList;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.stream.Collector;
 import java.util.stream.Collectors;
 
 /**
@@ -130,24 +137,50 @@ public class OmKeyLocationInfoGroup {
         .setVersion(version).setIsMultipartKey(isMultipartKey);
     List<OzoneManagerProtocolProtos.KeyLocation> keyLocationList =
         new ArrayList<>();
+    Set<DatanodeDetails> dnDetails = new HashSet<>();
     for (List<OmKeyLocationInfo> locationList : locationVersionMap.values()) {
       for (OmKeyLocationInfo keyInfo : locationList) {
         keyLocationList.add(keyInfo.getProtobuf(ignorePipeline, clientVersion));
+        Pipeline pipeline = keyInfo.getPipeline();
+        if (pipeline != null) {
+          dnDetails.addAll(pipeline.getNodes());
+        }
       }
+    }
+    if (!dnDetails.isEmpty()) {
+      builder.addAllMembers(
+          dnDetails.stream().map(DatanodeDetails::getProtoBufMessage)
+              .collect(Collectors.toList()));
     }
     return  builder.addAllKeyLocations(keyLocationList).build();
   }
 
   public static OmKeyLocationInfoGroup getFromProtobuf(
       KeyLocationList keyLocationList) {
-    return new OmKeyLocationInfoGroup(
-        keyLocationList.getVersion(),
-        keyLocationList.getKeyLocationsList().stream()
-            .map(OmKeyLocationInfo::getFromProtobuf)
-            .collect(Collectors.groupingBy(
-                OmKeyLocationInfo::getCreateVersion)),
-        keyLocationList.getIsMultipartKey()
-    );
+    Map<Long, List<OmKeyLocationInfo>> locations = new HashMap<>();
+    List<HddsProtos.DatanodeDetailsProto> membersList =
+        keyLocationList.getMembersList();
+    if (!membersList.isEmpty()) {
+      Map<UUID, DatanodeDetails> datanodeDetailsMap = new HashMap<>();
+      for (HddsProtos.DatanodeDetailsProto p : membersList) {
+        DatanodeDetails datanodeDetails = DatanodeDetails.getFromProtoBuf(p);
+        datanodeDetailsMap.put(datanodeDetails.getUuid(), datanodeDetails);
+      }
+      List<OzoneManagerProtocolProtos.KeyLocation> keyLocationsList =
+          keyLocationList.getKeyLocationsList();
+      for (OzoneManagerProtocolProtos.KeyLocation p : keyLocationsList) {
+        OmKeyLocationInfo omKeyLocationInfo =
+            OmKeyLocationInfo.getFromProtobuf(p, datanodeDetailsMap);
+        locations.computeIfAbsent(omKeyLocationInfo.getCreateVersion(),
+            (v) -> new ArrayList<>()).add(omKeyLocationInfo);
+      }
+    } else {
+      locations = keyLocationList.getKeyLocationsList().stream()
+          .map(OmKeyLocationInfo::getFromProtobuf)
+          .collect(Collectors.groupingBy(OmKeyLocationInfo::getCreateVersion));
+    }
+    return new OmKeyLocationInfoGroup(keyLocationList.getVersion(), locations,
+        keyLocationList.getIsMultipartKey());
   }
 
   /**
