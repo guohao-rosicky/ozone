@@ -109,6 +109,11 @@ public class ScmClient {
 
   static Pipeline newPipelineWithDNCache(Pipeline pipeline,
       Cache<UUID, DatanodeDetails> datanodeDetailsCache) {
+
+    if (true) {
+      return pipeline;
+    }
+
     Pipeline.Builder builder = Pipeline.newBuilder(pipeline);
     List<DatanodeDetails> nodes = new ArrayList<>();
     for (DatanodeDetails node : pipeline.getNodes()) {
@@ -127,9 +132,12 @@ public class ScmClient {
             newPorts.add(port);
           }
         }
-        node.setPorts(newPorts);
-        datanodeDetailsCache.put(node.getUuid(), node);
-        nodes.add(node);
+        DatanodeDetails newDatanodeDetails =
+            DatanodeDetails.newBuilder().setDatanodeDetails(datanodeDetails)
+                .setPort(newPorts).build();
+        datanodeDetailsCache.put(newDatanodeDetails.getUuid(),
+            newDatanodeDetails);
+        nodes.add(newDatanodeDetails);
       }
     }
     builder.setNodes(nodes);

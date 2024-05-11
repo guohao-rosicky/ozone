@@ -216,11 +216,6 @@ public class DatanodeDetails extends NodeImpl implements
     setPort(new Port(name, port));
   }
 
-  public synchronized void setPorts(List<Port> newPorts) {
-    ports.clear();
-    ports.addAll(newPorts);
-  }
-
   /**
    * Returns all the Ports used by DataNode.
    *
@@ -694,6 +689,11 @@ public class DatanodeDetails extends NodeImpl implements
      */
     public Builder addPort(Port port) {
       this.ports.add(port);
+      return this;
+    }
+
+    public Builder setPort(List<Port> newPorts) {
+      this.ports = newPorts;
       return this;
     }
 
