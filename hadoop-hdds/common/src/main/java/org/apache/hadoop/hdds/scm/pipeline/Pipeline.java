@@ -442,9 +442,10 @@ public final class Pipeline {
     int index = 0;
     int repIndexListLength = pipeline.getMemberReplicaIndexesCount();
 
-    if (!pipeline.getMembersUuid128List().isEmpty() &&
-        datanodeDetailsMap != null && !datanodeDetailsMap.isEmpty()) {
+    LOG.warn("guohao debug p: {} m: {}", pipeline, datanodeDetailsMap,
+        new Throwable());
 
+    if (datanodeDetailsMap != null) {
       for (HddsProtos.UUID uuid : pipeline.getMembersUuid128List()) {
         int repIndex = 0;
         DatanodeDetails datanodeDetails = datanodeDetailsMap.get(
