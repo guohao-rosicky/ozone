@@ -40,7 +40,9 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
@@ -65,6 +67,8 @@ public class BlockDeletingService extends BackgroundService {
 
   private final Duration blockDeletingMaxLockHoldingTime;
 
+  private Set<Long> inQueuedBlockDeletingContainers;
+
   @VisibleForTesting
   public BlockDeletingService(
       OzoneContainer ozoneContainer, long serviceInterval, long serviceTimeout,
@@ -82,6 +86,7 @@ public class BlockDeletingService extends BackgroundService {
   ) {
     super("BlockDeletingService", serviceInterval, timeUnit,
         workerSize, serviceTimeout, threadNamePrefix);
+    this.inQueuedBlockDeletingContainers = new CopyOnWriteArraySet<>();
     this.ozoneContainer = ozoneContainer;
     try {
       containerDeletionPolicy = conf.getClass(
@@ -121,6 +126,10 @@ public class BlockDeletingService extends BackgroundService {
       return numBlocksToDelete;
     }
 
+  }
+
+  public Set<Long> getInQueuedBlockDeletingContainers() {
+    return inQueuedBlockDeletingContainers;
   }
 
   @Override

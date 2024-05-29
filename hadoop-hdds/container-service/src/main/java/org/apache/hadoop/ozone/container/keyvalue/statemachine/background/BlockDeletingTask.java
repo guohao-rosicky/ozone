@@ -26,6 +26,7 @@ import java.util.LinkedList;
 import java.util.Objects;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.apache.hadoop.hdds.conf.ConfigurationSource;
@@ -73,6 +74,7 @@ public class BlockDeletingTask implements BackgroundTask {
   private final OzoneContainer ozoneContainer;
   private final ConfigurationSource conf;
   private Duration blockDeletingMaxLockHoldingTime;
+  private Set<Long> inQueuedBlockDeletingContainers;
 
   public BlockDeletingTask(
       BlockDeletingService blockDeletingService,
@@ -87,6 +89,8 @@ public class BlockDeletingTask implements BackgroundTask {
     this.containerData =
         (KeyValueContainerData) containerBlockInfo.getContainerData();
     this.blocksToDelete = containerBlockInfo.getNumBlocksToDelete();
+    this.inQueuedBlockDeletingContainers =
+        blockDeletingService.getInQueuedBlockDeletingContainers();
   }
 
   private static class ContainerBackgroundTaskResult
@@ -120,20 +124,29 @@ public class BlockDeletingTask implements BackgroundTask {
   public BackgroundTaskResult call() throws Exception {
     ContainerBackgroundTaskResult result =
         new ContainerBackgroundTaskResult();
-    while (blocksToDelete > 0) {
-      ContainerBackgroundTaskResult crr = handleDeleteTask();
-      if (blocksToDelete > 0 && crr.getSize() == 0) {
-        LOG.warn("Block deletion failed, remaining Blocks to be deleted {}," +
-                " but no Block be deleted. Container" +
-                " {}, pending block count {}",
-            blocksToDelete, containerData.getContainerID(),
-            containerData.getNumPendingDeletionBlocks());
-        break;
-      }
-      blocksToDelete -= crr.getSize();
-      result.addAll(crr.getDeletedBlocks());
+    if (inQueuedBlockDeletingContainers.contains(
+        containerData.getContainerID())) {
+      return result;
     }
-    return result;
+    inQueuedBlockDeletingContainers.add(containerData.getContainerID());
+    try {
+      while (blocksToDelete > 0) {
+        ContainerBackgroundTaskResult crr = handleDeleteTask();
+        if (blocksToDelete > 0 && crr.getSize() == 0) {
+          LOG.warn("Block deletion failed, remaining Blocks to be deleted {}," +
+                  " but no Block be deleted. Container" +
+                  " {}, pending block count {}", blocksToDelete,
+              containerData.getContainerID(),
+              containerData.getNumPendingDeletionBlocks());
+          break;
+        }
+        blocksToDelete -= crr.getSize();
+        result.addAll(crr.getDeletedBlocks());
+      }
+      return result;
+    } finally {
+      inQueuedBlockDeletingContainers.remove(containerData.getContainerID());
+    }
   }
 
   private ContainerBackgroundTaskResult handleDeleteTask() throws Exception {
