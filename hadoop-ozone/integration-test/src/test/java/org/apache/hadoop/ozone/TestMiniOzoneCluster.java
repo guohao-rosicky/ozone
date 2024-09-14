@@ -89,7 +89,7 @@ public class TestMiniOzoneCluster {
     List<HddsDatanodeService> datanodes = cluster.getHddsDatanodes();
     assertEquals(numberOfNodes, datanodes.size());
     for (HddsDatanodeService dn : datanodes) {
-      // Create a single member pipe line
+      // Create a single member pipeline
       List<DatanodeDetails> dns = new ArrayList<>();
       dns.add(dn.getDatanodeDetails());
       Pipeline pipeline = Pipeline.newBuilder()

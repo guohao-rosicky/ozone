@@ -41,6 +41,7 @@ public class XceiverClientCreator implements XceiverClientFactory {
   private final boolean topologyAwareRead;
   private final ClientTrustManager trustManager;
   private final boolean securityEnabled;
+  private final XceiverClientGrpcConnectionPool grpcConnectPool;
 
   public XceiverClientCreator(ConfigurationSource conf) {
     this(conf, null);
@@ -56,6 +57,8 @@ public class XceiverClientCreator implements XceiverClientFactory {
     if (securityEnabled) {
       Preconditions.checkNotNull(trustManager);
     }
+    this.grpcConnectPool =
+        new XceiverClientGrpcConnectionPool(conf, trustManager);
   }
 
   public boolean isSecurityEnabled() {
@@ -69,10 +72,10 @@ public class XceiverClientCreator implements XceiverClientFactory {
       client = XceiverClientRatis.newXceiverClientRatis(pipeline, conf, trustManager, errorInjector);
       break;
     case STAND_ALONE:
-      client = new XceiverClientGrpc(pipeline, conf, trustManager);
+      client = new XceiverClientGrpc(pipeline, conf, grpcConnectPool);
       break;
     case EC:
-      client = new ECXceiverClientGrpc(pipeline, conf, trustManager);
+      client = new ECXceiverClientGrpc(pipeline, conf, grpcConnectPool);
       break;
     case CHAINED:
     default:
