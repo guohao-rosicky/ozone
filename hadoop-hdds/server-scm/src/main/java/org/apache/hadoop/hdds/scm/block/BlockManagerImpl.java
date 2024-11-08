@@ -174,6 +174,42 @@ public class BlockManagerImpl implements BlockManager, BlockmanagerMXBean {
     return null;
   }
 
+  public List<AllocatedBlock> allocateBlocks(final long size,int num,
+      ReplicationConfig replicationConfig, String owner,
+      ExcludeList excludeList)
+      throws IOException {
+    if (LOG.isTraceEnabled()) {
+      LOG.trace("Size : {} , replicationConfig: {}", size, replicationConfig);
+    }
+    if (scm.getScmContext().isInSafeMode()) {
+      throw new SCMException("SafeModePrecheck failed for allocateBlock",
+          SCMException.ResultCodes.SAFE_MODE_EXCEPTION);
+    }
+    if (size < 0 || size > containerSize) {
+      LOG.warn("Invalid block size requested : {}", size);
+      throw new SCMException("Unsupported block size: " + size,
+          INVALID_BLOCK_SIZE);
+    }
+
+    List<ContainerInfo> containers = writableContainerFactory.getContainers(
+        size,num, replicationConfig, owner, excludeList);
+
+    if (containers != null && !containers.isEmpty()) {
+      List<AllocatedBlock> blocks = new ArrayList<>();
+      for (ContainerInfo container : containers) {
+        AllocatedBlock allocatedBlock = newBlock(container);
+        blocks.add(allocatedBlock);
+      }
+      return blocks;
+    }
+    // we have tried all strategies we know and but somehow we are not able
+    // to get a container for this block. Log that info and return a null.
+    LOG.error(
+        "Unable to allocate a block for the size: {}, replicationConfig: {}",
+        size, replicationConfig);
+    return null;
+  }
+
   /**
    * newBlock - returns a new block assigned to a container.
    *

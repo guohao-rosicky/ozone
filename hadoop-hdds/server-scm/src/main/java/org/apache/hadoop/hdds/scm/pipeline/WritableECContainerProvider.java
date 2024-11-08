@@ -184,6 +184,19 @@ public class WritableECContainerProvider
     }
   }
 
+  @Override
+  public List<ContainerInfo> getContainers(long size, int num,
+      ECReplicationConfig repConfig, String owner, ExcludeList excludeList)
+      throws IOException {
+    List<ContainerInfo> containers = new ArrayList<>();
+    for (int i = 0; i < num; i++) {
+      ContainerInfo container = getContainer(size, repConfig, owner,
+          excludeList);
+      containers.add(container);
+    }
+    return containers;
+  }
+
   private int getMaximumPipelines(ECReplicationConfig repConfig) {
     final double factor = providerConfig.getPipelinePerVolumeFactor();
     int volumeBasedCount = 0;

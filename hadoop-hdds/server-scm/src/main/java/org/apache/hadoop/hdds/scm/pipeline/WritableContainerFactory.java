@@ -27,6 +27,7 @@ import org.apache.hadoop.hdds.scm.pipeline.WritableECContainerProvider.WritableE
 import org.apache.hadoop.hdds.scm.server.StorageContainerManager;
 
 import java.io.IOException;
+import java.util.List;
 
 import static org.apache.hadoop.hdds.conf.StorageUnit.BYTES;
 import static org.apache.hadoop.hdds.scm.ScmConfigKeys.OZONE_SCM_CONTAINER_SIZE;
@@ -74,6 +75,24 @@ public class WritableContainerFactory {
       return ratisProvider.getContainer(size, repConfig, owner, excludeList);
     case EC:
       return ecProvider.getContainer(size, (ECReplicationConfig)repConfig,
+          owner, excludeList);
+    default:
+      throw new IOException(repConfig.getReplicationType()
+          + " is an invalid replication type");
+    }
+  }
+
+  public List<ContainerInfo> getContainers(final long size, int num,
+      ReplicationConfig repConfig, String owner, ExcludeList excludeList)
+      throws IOException {
+    switch (repConfig.getReplicationType()) {
+    case STAND_ALONE:
+      return standaloneProvider
+          .getContainers(size, num, repConfig, owner, excludeList);
+    case RATIS:
+      return ratisProvider.getContainers(size, num, repConfig, owner, excludeList);
+    case EC:
+      return ecProvider.getContainers(size, num, (ECReplicationConfig) repConfig,
           owner, excludeList);
     default:
       throw new IOException(repConfig.getReplicationType()
